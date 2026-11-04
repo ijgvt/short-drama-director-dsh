@@ -3478,9 +3478,9 @@ const PANEL_ID = 'dsh-short-drama-workbench';
         'retry': '重试',
         'dirty': '有未保存的改动',
         'copy': '复制',
-        'copyHint': '在本分镜下新增一个内容相同的分镜',
+        'copyHint': '在本分镜下新增一个提示词与资产绑定相同的分镜（不复制生成视频）',
         'add': '添加',
-        'addHint': '在本分镜下新增一个空白分镜',
+        'addHint': '在本分镜下新增一个无资产、无提示词的空白分镜',
         'shots': '个分镜',
         'seconds': '秒',
         'error.noSession': '这个面板需要一个会话才能读取工作区文件。',
@@ -3666,9 +3666,9 @@ const PANEL_ID = 'dsh-short-drama-workbench';
         'retry': 'Retry',
         'dirty': 'Unsaved changes',
         'copy': 'Copy',
-        'copyHint': 'Add a block below this one with the same content',
+        'copyHint': 'Add a block below this one with the same prompt and asset bindings (no generated video)',
         'add': 'Add',
-        'addHint': 'Add a blank block below this one',
+        'addHint': 'Add a block below this one with no assets or prompt text',
         'shots': 'shots',
         'seconds': 's',
         'error.noSession': 'This panel needs a session before it can read workspace files.',
@@ -11891,6 +11891,8 @@ const PANEL_ID = 'dsh-short-drama-workbench';
        const [sourceSwitchPending, setSourceSwitchPending] = React.useState(null);
        const sourceBlockCacheRef = React.useRef({});
        const shotSourceChoicesRef = React.useRef(readShotSourceChoices());
+      const pendingFocusedBlockRef = React.useRef(null);
+      const focusLockUntilRef = React.useRef(0);
        const dramaShotScrollRef = React.useRef(null);
        const dramaEditorFeedRef = React.useRef(null);
        const dramaScrollFrame = React.useRef(null);
@@ -12022,6 +12024,10 @@ const PANEL_ID = 'dsh-short-drama-workbench';
       const sourceChoiceKey = (blockNumber) => `${String(project)}\u0000${String(episode)}:${String(blockNumber)}`;
       const selectedSourceIdFor = (shot) => shot?.selectedSourceId
         ?? (shot?.h3 === true ? 'h3-zh' : 'video');
+      const shotIdentityIds = (shot) => new Set([
+        typeof shot?.shotId === 'string' ? shot.shotId : null,
+        ...Object.values(shot?.shotIdsBySource ?? {}).filter((value) => typeof value === 'string'),
+      ].filter(Boolean));
       const sequenceKeyFor = (shot) => `block:${String(episode)}:${String(
         shot?.sourceNumber
         ?? shot?.blockNumber
@@ -12099,6 +12105,13 @@ const PANEL_ID = 'dsh-short-drama-workbench';
         const variants = shot?.variants ?? {};
         const variant = variants[sourceId];
         if (variant === undefined || variant === null) return shot;
+        const shotIdsBySource = {
+          ...(shot?.shotIdsBySource ?? {}),
+          ...(typeof shot?.sourceId === 'string' && typeof shot?.shotId === 'string'
+            ? { [shot.sourceId]: shot.shotId }
+            : {}),
+          ...(typeof variant.shotId === 'string' ? { [sourceId]: variant.shotId } : {}),
+        };
         return {
           ...shot,
           ...variant,
@@ -12107,6 +12120,7 @@ const PANEL_ID = 'dsh-short-drama-workbench';
           cardKey: shot.cardKey,
           sequenceKey: shot.sequenceKey,
           variants: { ...variants, [sourceId]: variant },
+          shotIdsBySource,
           sourceId,
           selectedSourceId: sourceId,
         };
@@ -12120,11 +12134,15 @@ const PANEL_ID = 'dsh-short-drama-workbench';
           if (variant !== undefined) variants[sourceId] = variant;
         }
         variants[primaryShot.sourceId] = primaryShot;
+        const shotIdsBySource = Object.fromEntries(Object.entries(variants)
+          .filter(([, variant]) => typeof variant?.shotId === 'string')
+          .map(([sourceId, variant]) => [sourceId, variant.shotId]));
         let next = {
           ...primaryShot,
           cardKey: primaryShot.cardKey ?? sequenceKey,
           sequenceKey,
           variants,
+          shotIdsBySource,
           selectedSourceId: primaryShot.sourceId,
         };
         const chosen = shotSourceChoicesRef.current[sourceChoiceKey(blockNumber)] ?? primaryShot.sourceId;
@@ -13186,6 +13204,45 @@ const PANEL_ID = 'dsh-short-drama-workbench';
         writeShotSourceChoices(next);
       }, [episode, project]);
 
+      const shiftShotSourceChoicesAfterInsert = React.useCallback((insertedBlockNumber, sourceIdForNewShot) => {
+        if (!Number.isInteger(insertedBlockNumber) || insertedBlockNumber < 1) return;
+        const prefix = `${String(project)}\u0000${String(episode)}:`;
+        const entries = Object.entries(shotSourceChoicesRef.current ?? {});
+        const next = {};
+        for (const [key, value] of entries.filter(([key]) => !key.startsWith(prefix))) next[key] = value;
+        const scoped = entries
+          .filter(([key]) => key.startsWith(prefix))
+          .map(([key, value]) => ({ key, value, blockNumber: Number(key.slice(prefix.length)) }))
+          .filter((entry) => Number.isInteger(entry.blockNumber))
+          .sort((left, right) => right.blockNumber - left.blockNumber);
+        for (const entry of scoped) {
+          const nextNumber = entry.blockNumber >= insertedBlockNumber ? entry.blockNumber + 1 : entry.blockNumber;
+          next[`${prefix}${String(nextNumber)}`] = entry.value;
+        }
+        next[`${prefix}${String(insertedBlockNumber)}`] = sourceIdForNewShot;
+        shotSourceChoicesRef.current = next;
+        writeShotSourceChoices(next);
+      }, [episode, project]);
+
+      const shiftShotSourceChoicesAfterDelete = React.useCallback((deletedBlockNumber) => {
+        if (!Number.isInteger(deletedBlockNumber) || deletedBlockNumber < 1) return;
+        const prefix = `${String(project)}\u0000${String(episode)}:`;
+        const entries = Object.entries(shotSourceChoicesRef.current ?? {});
+        const next = {};
+        for (const [key, value] of entries.filter(([key]) => !key.startsWith(prefix))) next[key] = value;
+        const scoped = entries
+          .filter(([key]) => key.startsWith(prefix))
+          .map(([key, value]) => ({ value, blockNumber: Number(key.slice(prefix.length)) }))
+          .filter((entry) => Number.isInteger(entry.blockNumber) && entry.blockNumber !== deletedBlockNumber)
+          .sort((left, right) => left.blockNumber - right.blockNumber);
+        for (const entry of scoped) {
+          const nextNumber = entry.blockNumber > deletedBlockNumber ? entry.blockNumber - 1 : entry.blockNumber;
+          next[`${prefix}${String(nextNumber)}`] = entry.value;
+        }
+        shotSourceChoicesRef.current = next;
+        writeShotSourceChoices(next);
+      }, [episode, project]);
+
       const ingestSourceBlocks = React.useCallback((source, blocks) => {
         const normalized = (blocks ?? []).map((block, position) => sourceShotFromBlock(block, source, position));
         sourceBlockCacheRef.current[source.id] = normalized;
@@ -13643,6 +13700,10 @@ const PANEL_ID = 'dsh-short-drama-workbench';
             revision: data.revision ?? null,
             title: shot.title,
             missingH3File: false,
+            shotIdsBySource: {
+              ...(shot.shotIdsBySource ?? {}),
+              [selectedSourceId]: updated.shotId ?? shot.shotId ?? null,
+            },
             sourceId: selectedSourceId,
             selectedSourceId,
           };
@@ -13920,10 +13981,34 @@ const PANEL_ID = 'dsh-short-drama-workbench';
           }, folder, { retry: false });
         }
         if (data.revision !== null && data.revision !== undefined) savedRevisions.current.set(queueKey, data.revision);
+        const insertedBlockNumber = Number(
+          data.blockNumber
+          ?? data.shots?.[data.insertedAt]?.sourceNumber
+          ?? data.companion?.shots?.[data.companion?.insertedAt]?.sourceNumber,
+        );
+        shiftShotSourceChoicesAfterInsert(insertedBlockNumber, currentSource?.id === 'h3-zh' ? 'h3-zh' : 'video');
+        // Every source cache contains block-number lookups. A structural insert invalidates all
+        // of them, including the variants that are not currently visible.
+        sourceBlockCacheRef.current = {};
+        if (Number.isInteger(insertedBlockNumber) && insertedBlockNumber > 0) {
+          pendingFocusedBlockRef.current = {
+            blockNumber: insertedBlockNumber,
+            shotIds: [data.shotId, data.companion?.shotId].filter((value) => typeof value === 'string' && value.length > 0),
+            expectedCount: Array.isArray(data.shots) ? data.shots.length : null,
+          };
+          focusLockUntilRef.current = Date.now() + 5000;
+          setFocusedShotKey(`${String(episode)}:${String(insertedBlockNumber)}`);
+        }
         setReloadKey((value) => value + 1);
         setDrift(false);
-        return { insertedAt: data.insertedAt, kind: data.kind, shotId: data.shotId ?? null, companion: data.companion ?? null };
-      }, [ctx, sessionId, currentSource?.path, folder, revision]);
+        return {
+          insertedAt: data.insertedAt,
+          blockNumber: Number.isInteger(insertedBlockNumber) ? insertedBlockNumber : null,
+          kind: data.kind,
+          shotId: data.shotId ?? null,
+          companion: data.companion ?? null,
+        };
+      }, [ctx, sessionId, currentSource?.path, currentSource?.id, folder, revision, episode, shiftShotSourceChoicesAfterInsert]);
 
       const deleteShot = React.useCallback(async (locator) => {
         const file = locator?.file ?? currentSource?.path;
@@ -13954,10 +14039,28 @@ const PANEL_ID = 'dsh-short-drama-workbench';
           data = await callHost(ctx, sessionId, 'delete', { ...payload, expectedRevision: latest.revision }, folder, { retry: false });
         }
         if (data.revision !== null && data.revision !== undefined) savedRevisions.current.set(queueKey, data.revision);
+        const deletedBlockNumber = Number(data.blockNumber ?? locator.blockNumber);
+        shiftShotSourceChoicesAfterDelete(deletedBlockNumber);
+        sourceBlockCacheRef.current = {};
+        const remaining = Array.isArray(data.shots) ? data.shots.length : 0;
+        if (Number.isInteger(deletedBlockNumber) && deletedBlockNumber > 0 && remaining > 0) {
+          const focusBlockNumber = Math.min(deletedBlockNumber, remaining);
+          pendingFocusedBlockRef.current = {
+            blockNumber: focusBlockNumber,
+            shotIds: [],
+            expectedCount: remaining,
+          };
+          focusLockUntilRef.current = Date.now() + 5000;
+          setFocusedShotKey(`${String(episode)}:${String(focusBlockNumber)}`);
+        }
         setReloadKey((value) => value + 1);
         setDrift(false);
-        return { deletedAt: data.deletedAt, companion: data.companion ?? null };
-      }, [ctx, sessionId, currentSource?.path, folder, revision]);
+        return {
+          deletedAt: data.deletedAt,
+          blockNumber: Number.isInteger(deletedBlockNumber) ? deletedBlockNumber : null,
+          companion: data.companion ?? null,
+        };
+      }, [ctx, sessionId, currentSource?.path, folder, revision, episode, shiftShotSourceChoicesAfterDelete]);
 
       // A file with no 大分镜 headings still has content worth showing and editing, so it
       // is presented as one block rather than an empty panel.
@@ -13970,13 +14073,16 @@ const PANEL_ID = 'dsh-short-drama-workbench';
       const productionForShot = (shot) => {
         if (production === null || shot === undefined || shot === null) return null;
         const rows = production.shots ?? [];
-        if (currentSource?.id === 'video' && typeof shot.shotId === 'string' && shot.shotId.length > 0) {
-          const exact = rows.find((row) => row.shotId === shot.shotId);
-          if (exact !== undefined) return exact;
-        }
+        const identityIds = shotIdentityIds(shot);
+        const exactRows = rows.filter((row) => identityIds.has(row.shotId));
+        const exact = exactRows.find((row) => row.directIdentity === true)
+          ?? exactRows.find((row) => ['running', 'awaiting-review', 'decided', 'ready'].includes(row.state))
+          ?? exactRows[0];
+        if (exact !== undefined) return exact;
         const blockNumber = Number(shot.sourceNumber);
         if (!Number.isInteger(blockNumber)) return null;
-        return rows.find((row) => row.blockNumber === blockNumber
+        return rows.find((row) => (typeof row.shotId !== 'string' || row.shotId.length === 0)
+          && row.blockNumber === blockNumber
           && (row.episodeNumber === null || row.episodeNumber === Number(episode))) ?? null;
       };
       /**
@@ -13988,7 +14094,17 @@ const PANEL_ID = 'dsh-short-drama-workbench';
         ? blocks.filter((shot) => Number.isInteger(shot.sourceNumber)).length
         : (Number.isInteger(production?.total) ? production.total : 0);
       const candidateMatchesShot = (row, shot) => {
-        if (typeof shot.shotId === 'string' && row.shotId === shot.shotId) return true;
+        if (shotIdentityIds(shot).has(row.shotId)) return true;
+        // Once a candidate records an identity, positional fallback is unsafe: inserting a shot
+        // changes every later number, and an old clip must move with its block, not stay on the
+        // number it used to occupy. Fall back only for legacy results that never recorded one.
+        if (typeof row.shotId === 'string' && row.shotId.length > 0) {
+          const claimedByAnotherShot = blocks.some((entry) => entry !== shot && shotIdentityIds(entry).has(row.shotId));
+          // Older two-file fixtures can know the candidate's H3 identity before the H3 variant
+          // has been fetched. With only one shot there is no ambiguity; with multiple shots we
+          // wait for the variant map instead of guessing by a shifted block number.
+          if (claimedByAnotherShot || blocks.length > 1) return false;
+        }
         if (!Number.isInteger(row.blockNumber) || !Number.isInteger(shot.sourceNumber)) return false;
         if (Number(row.episodeNumber) !== Number(episode)) return false;
         // Re-splitting may reduce the block count. Older blocks beyond the new end are folded into
@@ -14132,6 +14248,26 @@ const PANEL_ID = 'dsh-short-drama-workbench';
         ?? shot?.displayNumber
         ?? (Number.isInteger(shot?.index) ? shot.index + 1 : ''),
       )}`;
+      React.useEffect(() => {
+        const pending = pendingFocusedBlockRef.current;
+        if (pending === null || !Number.isInteger(pending?.blockNumber)) return;
+        if (Number.isInteger(pending.expectedCount) && shots.length !== pending.expectedCount) return;
+        const target = visibleBlocks.find((shot) => Number(shot.sourceNumber) === pending.blockNumber
+          && (pending.shotIds.length === 0 || pending.shotIds.some((shotId) => shotIdentityIds(shot).has(shotId))));
+        if (target === undefined) return;
+        pendingFocusedBlockRef.current = null;
+        focusLockUntilRef.current = Date.now() + 5000;
+        setFocusedShotKey(shotRailKey(target));
+        const schedule = globalThis.requestAnimationFrame ?? ((callback) => callback());
+        const identity = shotCardIdentity(target);
+        schedule(() => schedule(() => {
+          const feed = dramaEditorFeedRef.current;
+          if (feed === null || feed === undefined || typeof feed.querySelectorAll !== 'function') return;
+          const section = [...feed.querySelectorAll('[data-dsh-drama-shot-section]')]
+            .find((element) => element.getAttribute('data-dsh-drama-shot-section') === identity);
+          section?.scrollIntoView?.({ block: 'start' });
+        }));
+      }, [visibleBlocks, shots.length, episode]);
       const shotCardIdentity = (shot) => shot?.shotId ?? `${shot?.file ?? currentSource?.path ?? ''}#${shot?.index ?? ''}`;
       const shotRenderKey = (shot) => shot?.cardKey
         ?? `${shot?.file ?? currentSource?.path ?? ''}#${shot?.shotId ?? `i${shot?.index ?? 0}`}`;
@@ -14212,6 +14348,7 @@ const PANEL_ID = 'dsh-short-drama-workbench';
         section?.scrollIntoView?.({ block: 'start' });
       };
       const syncWorkbenchShotFromScroll = () => {
+        if (Date.now() < focusLockUntilRef.current) return;
         if (dramaScrollFrame.current !== null) return;
         const schedule = globalThis.requestAnimationFrame ?? ((callback) => callback());
         dramaScrollFrame.current = schedule(() => {
