@@ -1,0 +1,53 @@
+{
+  "name": "dsh-plugin-short-drama-director",
+  "version": "1.1.0",
+  "private": true,
+  "license": "SEE LICENSE IN LICENSE",
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/ijgvt/short-drama-director-dsh.git"
+  },
+  "homepage": "https://github.com/ijgvt/short-drama-director-dsh",
+  "bugs": {
+    "url": "https://github.com/ijgvt/short-drama-director-dsh/issues"
+  },
+  "description": "短剧制作导演 Agent：ComfyUI 检测/部署、剧本资产盘点、资产生成、分集视频提示词与 H3 转换，以及左侧创作台工作区",
+  "type": "module",
+  "main": "./index.js",
+  "exports": {
+    ".": "./index.js",
+    "./client": "./client.js",
+    "./package.json": "./package.json"
+  },
+  "files": [
+    "index.js",
+    "client.js",
+    "cordis.patch.yml",
+    "lib",
+    "skills",
+    "vendor",
+    "安装说明.md",
+    "THIRD_PARTY_NOTICES.md"
+  ],
+  "peerDependencies": {
+    "@deepseek-ai/dsh-llm": "0.2.0-rc.2",
+    "@deepseek-ai/dsh-tools": "0.2.0-rc.2",
+    "@deepseek-ai/schemastery": "~3.18.4"
+  },
+  "scripts": {
+    "package": "node scripts/package-plugin.mjs"
+  },
+  "dsh": {
+    "bundle": {
+      "patch": "./cordis.patch.yml"
+    },
+    "client": {
+      "platform": "web",
+      "immediately": true
+    }
+  },
+  "meta": {
+    "title": "短剧制作导演",
+    "description": "以导演对话方式完成短剧制作：ComfyUI 部署、资产盘点与生成、分集视频提示词与 H3 转换，左侧创作台内置分镜管理与通用生成工作区。"
+  }
+}

@@ -1,0 +1,108 @@
+Short Drama Director Source-Available License 1.0
+Copyright (c) 2026 ijgvt
+
+This license applies to the software in this repository except where a file
+states another license or is identified as third-party material in
+THIRD_PARTY_NOTICES.md.
+
+1. DEFINITIONS
+
+"Software" means the source code, scripts, documentation, configuration, and
+other material distributed by the copyright holder under this license.
+
+"Derivative" means any modified, adapted, translated, compiled, bundled, or
+otherwise transformed version of the Software.
+
+"Commercial Resale" means selling, renting, leasing, sublicensing, paywalling,
+or otherwise receiving payment or consideration primarily for access to,
+installation of, or distribution of the Software or a Derivative.
+
+2. GRANT
+
+Subject to this license, the copyright holder grants you a worldwide,
+non-exclusive, royalty-free right to:
+
+  a. use the Software for any lawful purpose;
+
+  b. make and use Derivatives for any lawful purpose;
+
+  c. distribute the Software or a Derivative free of charge; and
+
+  d. use the Software to create, publish, distribute, and commercially exploit
+     your own audiovisual content, including paid short dramas and other videos.
+
+No trademark rights are granted. You may not represent a Derivative as an
+official release unless the copyright holder gives written permission.
+
+3. NO COMMERCIAL RESALE
+
+You may not engage in Commercial Resale of the Software or any Derivative.
+This includes without limitation:
+
+  a. charging a fee to distribute, install, unlock, or provide access to the
+     Software or a Derivative;
+
+  b. selling the Software or a Derivative as a standalone plugin, bundled
+     product, template pack, course resource, or paid marketplace item;
+
+  c. uploading the Software or a Derivative to a paid plugin marketplace or
+     charging customers for licenses to it.
+
+Charging separately for your own production services that use the Software to
+create original audiovisual content is permitted, provided you do not thereby
+sell or redistribute the Software itself.
+
+4. REDISTRIBUTION CONDITIONS
+
+If you distribute the Software or a Derivative, you must:
+
+  a. provide it free of charge;
+
+  b. include this license and all copyright and attribution notices;
+
+  c. clearly mark modified versions as modified;
+
+  d. not remove license, attribution, or third-party notices; and
+
+  e. require every recipient to comply with this license.
+
+You may not sublicense the Software under terms that grant rights broader than
+this license.
+
+5. OUTPUTS
+
+This license does not claim ownership of audiovisual or other output that you
+create using the Software. Any third-party models, nodes, workflows, reference
+assets, or other materials used with the Software remain governed by their own
+licenses and terms.
+
+6. CONTRIBUTIONS
+
+Unless a contribution is accompanied by an explicit written statement to the
+contrary, any contribution intentionally submitted for inclusion in the
+Software is licensed to the copyright holder under this license.
+
+7. TERMINATION
+
+Your rights under this license terminate automatically if you violate it. Upon
+termination, you must stop distributing the Software and Derivative. Rights in
+original audiovisual content you created before termination are not revoked by
+this section, subject to any third-party terms.
+
+8. DISCLAIMER OF WARRANTY
+
+THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR
+IMPLIED, INCLUDING WITHOUT LIMITATION WARRANTIES OF MERCHANTABILITY, FITNESS
+FOR A PARTICULAR PURPOSE, TITLE, NON-INFRINGEMENT, AND FREEDOM FROM ERRORS.
+
+9. LIMITATION OF LIABILITY
+
+TO THE MAXIMUM EXTENT PERMITTED BY LAW, THE COPYRIGHT HOLDER WILL NOT BE LIABLE
+FOR ANY DIRECT, INDIRECT, INCIDENTAL, SPECIAL, CONSEQUENTIAL, OR OTHER DAMAGES
+ARISING FROM THE SOFTWARE OR YOUR USE OF IT, EVEN IF ADVISED OF THE
+POSSIBILITY OF SUCH DAMAGES.
+
+10. NO OTHER RIGHTS
+
+All rights not expressly granted in this license are reserved by the copyright
+holder.

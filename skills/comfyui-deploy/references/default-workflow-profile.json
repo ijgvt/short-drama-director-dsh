@@ -1,0 +1,127 @@
+{
+  "schemaVersion": 1,
+  "package": {
+    "name": "ComfyUI-Deploy-20261022",
+    "type": "aki-integrated",
+    "mainArchive": "ComfyUI/ComfyUI-aki-v3.2.rar",
+    "manifests": [
+      "README_必读.txt",
+      "MANIFEST.txt",
+      "INSTALL_PROMPT.md"
+    ]
+  },
+  "workflowTasks": {
+    "text-to-image": {
+      "preferredNames": [
+        "▶▷Krea2-文生图.json"
+      ],
+      "requiredCapabilities": [
+        "text-to-image"
+      ]
+    },
+    "image-edit": {
+      "preferredNames": [
+        "▶▷Qwen-image21-图像编辑+生图流（整合）.json"
+      ],
+      "requiredCapabilities": [
+        "image-to-image"
+      ],
+      "promptMode": "qwen-official"
+    },
+    "upscale-image": {
+      "preferredNames": [
+        "▶▷VOSR2-图像放大.json",
+        "▶▷VOSR2-图像超分（云端）.json"
+      ],
+      "requiredCapabilities": [
+        "upscale-image"
+      ],
+      "freshPackageSha256": "69CDC2DFB662D3019361C3F84A42579D858D79608C71B70126BD1BC30B1E3BBC",
+      "historicalNames": [
+        "▶▷VOSR2-图像+视频放大.json"
+      ],
+      "historicalIsFallbackOnly": true
+    },
+    "upscale-video": {
+      "preferredNames": [
+        "▶▷VOSR2-视频放大.json",
+        "▶▷VOSR2-视频超分（云端）.json"
+      ],
+      "requiredCapabilities": [
+        "upscale-video"
+      ],
+      "freshPackageSha256": "25CE10678F0414F336CDB8C81258C143DD17B514327140BEE6B36682576D2B8D",
+      "historicalNames": [
+        "▶▷VOSR2-图像+视频放大.json"
+      ],
+      "historicalIsFallbackOnly": true,
+      "targetResolutionControl": true
+    },
+    "video-generation": {
+      "preferredNames": [
+        "YZ金鱼-MiniMax H3 终极篇-文武双全.json",
+        "YZ金鱼-MiniMax H3 终极篇-文武双全（云端）.json"
+      ],
+      "requiredCapabilities": [
+        "reference-to-video"
+      ]
+    }
+  },
+  "endpoints": {
+    "local": {
+      "text-to-image": "local",
+      "image-edit": "local",
+      "upscale-image": "local",
+      "upscale-video": "local",
+      "video-generation": "local"
+    },
+    "cloud": {
+      "text-to-image": "cloud",
+      "image-edit": "cloud",
+      "upscale-image": "cloud",
+      "upscale-video": "cloud",
+      "video-generation": "cloud"
+    },
+    "both": {
+      "text-to-image": "cloud",
+      "image-edit": "cloud",
+      "upscale-image": "cloud",
+      "upscale-video": "cloud",
+      "video-generation": "cloud"
+    }
+  },
+  "videoDefaults": {
+    "modelPreference": "minimax_h3_hybrid_fl2va_ref2va_b20-49-int8.safetensors",
+    "modelFallback": "first-runnable-instance-model",
+    "writeMode": "drama",
+    "modes": {
+      "drama": {
+        "totalSteps": 12,
+        "firstPassSteps": 8,
+        "secondPassSteps": 4,
+        "scheduler": "beta"
+      },
+      "action": {
+        "totalSteps": 14,
+        "firstPassSteps": 10,
+        "secondPassSteps": 4,
+        "scheduler": "beta"
+      }
+    }
+  },
+  "promptSource": {
+    "selected": "builtin-general"
+  },
+  "verification": {
+    "requiredTasks": [
+      "text-to-image",
+      "image-edit",
+      "upscale-image",
+      "upscale-video",
+      "video-generation"
+    ],
+    "requiredEndpointCount": 5,
+    "requireReadback": true,
+    "requireActualPaths": true
+  }
+}

@@ -1,0 +1,5 @@
+interface:
+  display_name: "H3 Prompt Converter"
+  short_description: "把中文分镜稿/分镜表转成 MiniMax H3 官方提示词格式"
+  brand_color: "#7C3AED"
+  default_prompt: "用 $h3-prompt-converter 把这份 step_3 分镜稿转成 MiniMax H3 官方提示词。"
