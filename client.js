@@ -107,6 +107,7 @@ const PANEL_ID = 'dsh-short-drama-workbench';
       ['decided', '已选用'],
     ];
     const DRAMA_PANE_STORAGE_KEY = 'dsh-sdd-drama-pane-widths-v2';
+    const SHOT_SOURCE_STORAGE_KEY = 'dsh-sdd-shot-sources-v1';
     const DEFAULT_DRAMA_PANE_WIDTHS = Object.freeze({ assets: 236, prompt: 390 });
     const DRAMA_PANE_MIN_WIDTHS = Object.freeze({ assets: 184, prompt: 280, preview: 210 });
     const DRAMA_PANE_SPLITTER_TOTAL = 16;
@@ -135,6 +136,23 @@ const PANEL_ID = 'dsh-short-drama-workbench';
         globalThis.localStorage?.setItem(DRAMA_PANE_STORAGE_KEY, JSON.stringify(widths));
       } catch {
         // Resizing remains usable without storage.
+      }
+    }
+
+    function readShotSourceChoices() {
+      try {
+        const value = JSON.parse(globalThis.localStorage?.getItem(SHOT_SOURCE_STORAGE_KEY) ?? '{}');
+        return value !== null && typeof value === 'object' && !Array.isArray(value) ? value : {};
+      } catch {
+        return {};
+      }
+    }
+
+    function writeShotSourceChoices(choices) {
+      try {
+        globalThis.localStorage?.setItem(SHOT_SOURCE_STORAGE_KEY, JSON.stringify(choices));
+      } catch {
+        // The in-memory choice still applies for this session.
       }
     }
 
@@ -5290,6 +5308,9 @@ const PANEL_ID = 'dsh-short-drama-workbench';
       }, [draft, shot.h3, onRequestReferences]);
 
       const dirty = draft !== accepted.current.text;
+      const visibleNote = note.length > 0 && note !== t('saved') && note !== t('unchanged')
+        ? note
+        : '';
       const save = async () => {
         if (saving.current || conflict !== null || latest.current === accepted.current.text) return;
         saving.current = true;
@@ -5478,8 +5499,16 @@ const PANEL_ID = 'dsh-short-drama-workbench';
         // itself carried the height, the footer was the last child and swallowed every spare pixel,
         // which is why 「已自动保存」 turned into a huge band.
         style: wide && open
-          ? { ...css.card, height: '100%', minHeight: 0, display: 'flex', flexDirection: 'column', overflow: 'hidden' }
-          : css.card,
+          ? {
+            ...css.card,
+            position: 'relative',
+            height: '100%',
+            minHeight: 0,
+            display: 'flex',
+            flexDirection: 'column',
+            overflow: 'hidden',
+          }
+          : { ...css.card, position: 'relative' },
       },
         h('div', {
           className: 'sdd-card-head',
@@ -5866,7 +5895,32 @@ const PANEL_ID = 'dsh-short-drama-workbench';
               }, t('draft.keepBoth')),
             ),
           ),
-          (saveError || (restored && dirty) || note.length > 0) ? h('div', { className: 'sdd-card-foot', style: css.cardFoot },
+          visibleNote.length > 0 && h('div', {
+            className: 'sdd-card-note',
+            'data-dsh-card-note': 'true',
+            role: 'status',
+            style: {
+              position: 'absolute',
+              top: '50px',
+              right: '12px',
+              zIndex: 4,
+              maxWidth: 'min(360px, calc(100% - 24px))',
+              padding: '6px 9px',
+              border: '1px solid var(--sdd-border)',
+              borderRadius: '6px',
+              background: 'var(--sdd-surface)',
+              boxShadow: 'var(--sdd-shadow-md)',
+              color: 'var(--sdd-muted)',
+              fontSize: '10.5px',
+              lineHeight: 1.45,
+              pointerEvents: 'none',
+            },
+          }, displayShotText(visibleNote)),
+          (saveError || (restored && dirty))
+            ? h('div', {
+              className: 'sdd-card-foot',
+              style: css.cardFoot,
+            },
             saveError && h('span', { style: css.error, role: 'alert' }, `自动保存失败，草稿已保留：${saveError}`),
             saveError && h('button', { type: 'button', style: css.miniButton, onClick: () => { setSaveError(''); } }, '重试'),
             // A refusal that is a BOUNDARY, not a hiccup: retrying fails exactly the same way, so
@@ -5885,7 +5939,6 @@ const PANEL_ID = 'dsh-short-drama-workbench';
             // Restored text that looked like the file's own is how someone saves a half-finished
             // paragraph over a finished one, so the fact is stated rather than implied.
             restored && dirty && h('span', { style: css.drift }, t('draft.restored')),
-            note.length > 0 && h('span', { style: css.note, role: 'status' }, note),
           ) : null,
           shot.h3 === true && h('div', {
             className: 'sdd-generation-controls',
@@ -11835,6 +11888,9 @@ const PANEL_ID = 'dsh-short-drama-workbench';
        const [productionError, setProductionError] = React.useState('');
        const [shotFilter, setShotFilter] = React.useState('all');
        const [focusedShotKey, setFocusedShotKey] = React.useState(null);
+       const [sourceSwitchPending, setSourceSwitchPending] = React.useState(null);
+       const sourceBlockCacheRef = React.useRef({});
+       const shotSourceChoicesRef = React.useRef(readShotSourceChoices());
        const dramaShotScrollRef = React.useRef(null);
        const dramaEditorFeedRef = React.useRef(null);
        const dramaScrollFrame = React.useRef(null);
@@ -11963,6 +12019,121 @@ const PANEL_ID = 'dsh-short-drama-workbench';
           || !Number.isInteger(Number(blockNumber)) || Number(blockNumber) < 1) return null;
         return `${episodeFolder.replace(/\\/gu, '/').replace(/\/+$/u, '')}/第${String(episode)}集H3提示词-大分镜${String(blockNumber)}（中文）.txt`;
       };
+      const sourceChoiceKey = (blockNumber) => `${String(project)}\u0000${String(episode)}:${String(blockNumber)}`;
+      const selectedSourceIdFor = (shot) => shot?.selectedSourceId
+        ?? (shot?.h3 === true ? 'h3-zh' : 'video');
+      const sequenceKeyFor = (shot) => `block:${String(episode)}:${String(
+        shot?.sourceNumber
+        ?? shot?.blockNumber
+        ?? (Number.isInteger(shot?.index) ? shot.index + 1 : ''),
+      )}`;
+      /**
+       * Turn one block from a SOURCE into the shape a card needs.
+       *
+       * The source is kept on the block. A card may therefore show Chinese H3 while the next
+       * card still shows the video prompt; no part of this shape depends on a global "active
+       * source" once the source has been read.
+       */
+      const sourceShotFromBlock = (block, source, position = 0) => {
+        const blockNumber = Number(block.blockNumber ?? block.sourceNumber ?? position + 1);
+        const file = block.file ?? source?.path ?? null;
+        const missingH3File = block.missingH3File === true;
+        const target = missingH3File ? missingH3TargetFor(blockNumber, file) : file;
+        return {
+          ...block,
+          index: Number.isInteger(block.index) ? block.index : 0,
+          title: `分镜 ${String(blockNumber)}`,
+          sourceNumber: blockNumber,
+          fileName: String(target ?? file ?? '').replace(/\\/gu, '/').split('/').pop(),
+          file: target ?? file,
+          revision: block.revision ?? null,
+          h3: source?.id !== 'video',
+          sourceId: source?.id ?? 'video',
+          selectedSourceId: source?.id ?? 'video',
+          missingH3File,
+          seconds: block.seconds,
+          shotCount: 0,
+          shotId: block.shotId ?? null,
+          text: String(block.text ?? ''),
+          references: block.references ?? [],
+          referenceSlots: block.referenceSlots ?? [],
+          unresolved: block.unresolved ?? [],
+          ambiguous: block.ambiguous ?? [],
+          orderedInputs: block.orderedInputs ?? [],
+        };
+      };
+      const missingH3VariantFor = (shot) => {
+        const base = shot?.variants?.video ?? shot;
+        const blockNumber = Number(
+          base?.sourceNumber
+          ?? base?.blockNumber
+          ?? shot?.sourceNumber
+          ?? (Number.isInteger(base?.index) ? base.index + 1 : NaN),
+        );
+        const target = missingH3TargetFor(blockNumber, base?.file ?? shot?.file ?? currentSource?.path ?? null);
+        if (target === null) return null;
+        return {
+          ...base,
+          index: 0,
+          blockNumber,
+          sourceNumber: blockNumber,
+          file: target,
+          fileName: target.replace(/\\/gu, '/').split('/').pop(),
+          cardKey: `missing-h3:${target}`,
+          shotId: null,
+          revision: null,
+          h3: true,
+          sourceId: 'h3-zh',
+          selectedSourceId: 'h3-zh',
+          missingH3File: true,
+          sourceVideoFile: base?.file ?? null,
+          text: '',
+          references: [],
+          referenceSlots: [],
+          unresolved: [],
+          ambiguous: [],
+          orderedInputs: [],
+        };
+      };
+      const applyShotSource = (shot, sourceId) => {
+        const variants = shot?.variants ?? {};
+        const variant = variants[sourceId];
+        if (variant === undefined || variant === null) return shot;
+        return {
+          ...shot,
+          ...variant,
+          // The wrapper identity belongs to the shot, not to either prompt file. Switching the
+          // source must not remount the editor or discard its open/draft state.
+          cardKey: shot.cardKey,
+          sequenceKey: shot.sequenceKey,
+          variants: { ...variants, [sourceId]: variant },
+          sourceId,
+          selectedSourceId: sourceId,
+        };
+      };
+      const composeStoredShot = (primaryShot) => {
+        const blockNumber = Number(primaryShot.sourceNumber);
+        const sequenceKey = `block:${String(episode)}:${String(blockNumber)}`;
+        const variants = {};
+        for (const [sourceId, cachedBlocks] of Object.entries(sourceBlockCacheRef.current)) {
+          const variant = (cachedBlocks ?? []).find((entry) => Number(entry.sourceNumber) === blockNumber);
+          if (variant !== undefined) variants[sourceId] = variant;
+        }
+        variants[primaryShot.sourceId] = primaryShot;
+        let next = {
+          ...primaryShot,
+          cardKey: primaryShot.cardKey ?? sequenceKey,
+          sequenceKey,
+          variants,
+          selectedSourceId: primaryShot.sourceId,
+        };
+        const chosen = shotSourceChoicesRef.current[sourceChoiceKey(blockNumber)] ?? primaryShot.sourceId;
+        if (chosen === 'h3-zh' && variants['h3-zh'] === undefined && h3SourceOption?.available === false) {
+          const missing = missingH3VariantFor(next);
+          if (missing !== null) next = { ...next, variants: { ...next.variants, 'h3-zh': missing } };
+        }
+        return applyShotSource(next, chosen);
+      };
       const videoBlockNumbers = (videoSourceOption?.files ?? [])
         .map((file) => Number(file.blockNumber))
         .filter((value) => Number.isInteger(value) && value > 0);
@@ -11981,6 +12152,13 @@ const PANEL_ID = 'dsh-short-drama-workbench';
         setSourceGenerateError('');
         setH3CompileConfirm(false);
       }, [project, episode, sourceId]);
+
+      React.useEffect(() => {
+        // Source variants belong to one episode. Reusing a block-number cache across projects or
+        // episodes would show one creator's H3 under another creator's shot.
+        sourceBlockCacheRef.current = {};
+        setSourceSwitchPending(null);
+      }, [project, episode]);
 
       /**
        * Turn a media handle into a URL the browser can load.
@@ -12996,6 +13174,105 @@ const PANEL_ID = 'dsh-short-drama-workbench';
         });
       }, [recordDirectorContext, episode]);
 
+      const rememberShotSource = React.useCallback((shot, sourceId) => {
+        const blockNumber = Number(
+          shot?.sourceNumber
+          ?? shot?.blockNumber
+          ?? (Number.isInteger(shot?.index) ? shot.index + 1 : NaN),
+        );
+        if (!Number.isInteger(blockNumber) || blockNumber < 1) return;
+        const next = { ...shotSourceChoicesRef.current, [sourceChoiceKey(blockNumber)]: sourceId };
+        shotSourceChoicesRef.current = next;
+        writeShotSourceChoices(next);
+      }, [episode, project]);
+
+      const ingestSourceBlocks = React.useCallback((source, blocks) => {
+        const normalized = (blocks ?? []).map((block, position) => sourceShotFromBlock(block, source, position));
+        sourceBlockCacheRef.current[source.id] = normalized;
+        setRefsByShot((current) => {
+          const next = { ...current };
+          for (const block of normalized) {
+            const key = block.shotId ?? `${block.file}#${block.index}`;
+            next[key] = {
+              ...(current[key] ?? {}),
+              references: block.references ?? [],
+              unresolved: block.unresolved ?? [],
+              ambiguous: block.ambiguous ?? [],
+              orderedInputs: block.orderedInputs ?? [],
+              referenceSlots: block.referenceSlots ?? [],
+              choices: current[key]?.choices ?? {},
+              loading: false,
+            };
+          }
+          return next;
+        });
+        return normalized;
+      }, [episode, currentEpisode?.folder]);
+
+      const loadSourceBlocks = React.useCallback(async (source) => {
+        const cached = sourceBlockCacheRef.current[source.id];
+        if (Array.isArray(cached)) return cached;
+        if (typeof source?.path !== 'string' || source.path.length === 0) return [];
+        const data = await callHost(ctx, sessionId, 'episode-blocks', {
+          project,
+          file: source.path,
+          organise: directorMode === 'drama',
+          language: 'zh',
+        }, folder);
+        return ingestSourceBlocks(source, data.blocks ?? []);
+      }, [ctx, sessionId, project, folder, directorMode, ingestSourceBlocks]);
+
+      const switchShotSource = React.useCallback(async (shot, nextSourceId) => {
+        const current = selectedSourceIdFor(shot);
+        if (current === nextSourceId) return;
+        const blockNumber = Number(
+          shot?.sourceNumber
+          ?? shot?.blockNumber
+          ?? (Number.isInteger(shot?.index) ? shot.index + 1 : NaN),
+        );
+        if (!Number.isInteger(blockNumber) || blockNumber < 1) return;
+        const pendingKey = sourceChoiceKey(blockNumber);
+        if (sourceSwitchPending === pendingKey) return;
+        setSourceSwitchPending(pendingKey);
+        setError('');
+        try {
+          const source = sourceOptions.find((entry) => entry.id === nextSourceId);
+          let variant = shot?.variants?.[nextSourceId] ?? null;
+          if (variant === null && source?.available === true) {
+            const blocks = await loadSourceBlocks(source);
+            variant = blocks.find((entry) => Number(entry.sourceNumber) === blockNumber) ?? null;
+          }
+          if (variant === null && nextSourceId === 'h3-zh') {
+            variant = missingH3VariantFor(shot);
+          }
+          if (variant === null) {
+            throw new Error(`还没有可打开的第 ${String(blockNumber)} 分镜${nextSourceId === 'h3-zh' ? ' H3' : '视频提示词'}`);
+          }
+          rememberShotSource(shot, nextSourceId);
+          const sequenceKey = sequenceKeyFor(shot);
+          setShots((previous) => previous.map((entry) => (
+            sequenceKeyFor(entry) === sequenceKey
+              ? applyShotSource({
+                ...entry,
+                variants: { ...(entry.variants ?? {}), [nextSourceId]: variant },
+              }, nextSourceId)
+              : entry
+          )));
+          const number = Number(episode);
+          if (Number.isInteger(number) && number > 0) {
+            void recordDirectorContext({
+              episodeNumber: number,
+              sourceId: currentSource?.id ?? 'video',
+              shotId: variant.shotId ?? null,
+            });
+          }
+        } catch (failure) {
+          setError(String(failure?.message ?? failure));
+        } finally {
+          setSourceSwitchPending((currentKey) => currentKey === pendingKey ? null : currentKey);
+        }
+      }, [sourceOptions, sourceSwitchPending, episode, currentSource?.id, loadSourceBlocks, rememberShotSource, recordDirectorContext]);
+
       // The Host chooses the initial project root; retain it for every later operation.
       React.useEffect(() => {
         if (folder.length > 0) return;
@@ -13128,7 +13405,7 @@ const PANEL_ID = 'dsh-short-drama-workbench';
               : sourceBlocks;
             setShotFiles(displayBlocks);
             for (const block of displayBlocks) if (block.revision !== null && block.revision !== undefined) savedRevisions.current.set(`${folder}#${block.file}`, block.revision);
-            setShots(displayBlocks.map((block) => ({
+            const primaryShots = displayBlocks.map((block) => ({
               ...block,
               index: block.index,
               // The label the card shows: which 大分镜, and which FILE it is being saved back into.
@@ -13146,7 +13423,11 @@ const PANEL_ID = 'dsh-short-drama-workbench';
               text: block.text,
               references: block.references ?? [],
               referenceSlots: block.referenceSlots ?? [],
-            })));
+              sourceId: currentSource.id,
+              selectedSourceId: currentSource.id,
+            }));
+            sourceBlockCacheRef.current[currentSource.id] = primaryShots;
+            setShots(primaryShots.map(composeStoredShot));
             setRefsByShot((current) => {
               const next = { ...current };
               for (const block of displayBlocks) {
@@ -13214,7 +13495,7 @@ const PANEL_ID = 'dsh-short-drama-workbench';
               // catches.
               const data = await callHost(ctx, sessionId, 'read', { file }, folder);
               if (!live) return;
-              setShots((data.shots ?? []).map((shot, position) => missingH3Preview
+              const primaryShots = (data.shots ?? []).map((shot, position) => missingH3Preview
                 ? (() => {
                   const blockNumber = Number(shot.sourceNumber ?? position + 1);
                   const target = missingH3TargetFor(blockNumber, file);
@@ -13238,10 +13519,20 @@ const PANEL_ID = 'dsh-short-drama-workbench';
                 })()
                 : {
                   ...shot,
+                  sourceNumber: Number(shot.sourceNumber ?? position + 1),
                   file,
                   cardKey: shot.shotId ?? `${file}#${shot.index}`,
                   h3: currentSource?.id !== 'video',
-                }));
+                });
+              sourceBlockCacheRef.current[currentSource.id] = primaryShots;
+              setShots(primaryShots.map((shot) => composeStoredShot({
+                ...shot,
+                sourceId: currentSource.id,
+                selectedSourceId: currentSource.id,
+                cardKey: shot.cardKey ?? shot.shotId ?? `${shot.file}#${shot.index}`,
+                references: shot.references ?? [],
+                referenceSlots: shot.referenceSlots ?? [],
+              })));
               setShotFiles([]);
               setRevision(Number.isInteger(data.revision) ? data.revision : null);
               setDrift(data.changedOnDisk === true);
@@ -13259,6 +13550,33 @@ const PANEL_ID = 'dsh-short-drama-workbench';
           .finally(() => { if (live) setBusy(false); });
         return () => { live = false; };
       }, [ctx, sessionId, readableSource?.path, missingH3Preview, currentEpisode?.folder, project, folder, reloadKey, directorMode, loadProductionProgress]);
+
+      React.useEffect(() => {
+        if (h3SourceOption?.available !== true || typeof h3SourceOption.path !== 'string') return undefined;
+        const prefix = `${String(project)}\u0000${String(episode)}:`;
+        const hasStoredChoice = Object.entries(shotSourceChoicesRef.current)
+          .some(([key, value]) => value === 'h3-zh' && key.startsWith(prefix));
+        if (!hasStoredChoice) return undefined;
+        let live = true;
+        loadSourceBlocks(h3SourceOption)
+          .then((blocks) => {
+            if (!live) return;
+            setShots((previous) => previous.map((shot) => {
+              const key = sourceChoiceKey(shot.sourceNumber ?? shot.blockNumber);
+              if (shotSourceChoicesRef.current[key] !== 'h3-zh') return shot;
+              const variant = blocks.find((entry) => Number(entry.sourceNumber) === Number(shot.sourceNumber));
+              if (variant === undefined) return shot;
+              return applyShotSource({
+                ...shot,
+                variants: { ...(shot.variants ?? {}), 'h3-zh': variant },
+              }, 'h3-zh');
+            }));
+          })
+          .catch((failure) => {
+            if (live) setError(String(failure?.message ?? failure));
+          });
+        return () => { live = false; };
+      }, [project, episode, h3SourceOption?.available, h3SourceOption?.path, reloadKey, loadSourceBlocks]);
 
       /**
        * Save one block.
@@ -13316,14 +13634,31 @@ const PANEL_ID = 'dsh-short-drama-workbench';
         setShots((previous) => previous.map((shot) => {
           if ((shot.file ?? currentSource?.path) !== file) return shot;
           const updated = (data.shots ?? []).find((entry) => byId ? entry.shotId === shot.shotId : entry.index === shot.index);
-          return updated === undefined ? shot : {
+          if (updated === undefined) return shot;
+          const selectedSourceId = selectedSourceIdFor(shot);
+          const nextShot = {
             ...shot,
             ...updated,
             file,
             revision: data.revision ?? null,
             title: shot.title,
             missingH3File: false,
+            sourceId: selectedSourceId,
+            selectedSourceId,
           };
+          const variants = { ...(shot.variants ?? {}), [selectedSourceId]: nextShot };
+          const cached = sourceBlockCacheRef.current[selectedSourceId];
+          if (Array.isArray(cached)) {
+            const blockNumber = Number(nextShot.sourceNumber);
+            const nextCache = cached.map((entry) => Number(entry.sourceNumber) === blockNumber
+              ? { ...entry, ...updated, file, revision: data.revision ?? null, missingH3File: false }
+              : entry);
+            if (!nextCache.some((entry) => Number(entry.sourceNumber) === blockNumber)) {
+              nextCache.push(nextShot);
+            }
+            sourceBlockCacheRef.current[selectedSourceId] = nextCache;
+          }
+          return { ...nextShot, variants };
         }));
         setDrift(false);
         if (data.created === true) {
@@ -13496,9 +13831,9 @@ const PANEL_ID = 'dsh-short-drama-workbench';
           index: shot.index,
           shotId: shot.shotId ?? null,
           episodeNumber: number,
-          sourceId: currentSource?.id ?? null,
+          sourceId: selectedSourceIdFor(shot),
         }, folder, { retry: false });
-      }, [ctx, sessionId, project, episode, folder, currentSource?.id, directorMode, t]);
+      }, [ctx, sessionId, project, episode, folder, directorMode, t]);
       /**
        * Create a missing prompt version from the panel.
        *
@@ -13508,7 +13843,6 @@ const PANEL_ID = 'dsh-short-drama-workbench';
      * video prompt and is the only H3 document this workflow creates.
        */
       const generateMissingSource = React.useCallback(async () => {
-        if (currentSource?.id !== 'h3-zh') return;
         if (directorMode !== 'drama') {
           setSourceGenerateError(t('mode.required'));
           return;
@@ -13536,7 +13870,6 @@ const PANEL_ID = 'dsh-short-drama-workbench';
           setH3CompileConfirm(false);
           setSourceGenerateNote('中文 H3 已同步到全部分镜。');
           setReloadKey((value) => value + 1);
-          setSourceId('h3-zh');
         } catch (error) {
           setSourceGenerateError(String(error?.message ?? error));
         } finally {
@@ -13806,26 +14139,47 @@ const PANEL_ID = 'dsh-short-drama-workbench';
         ?? visibleBlocks.find((shot) => typeof directorContext?.shotId === 'string' && shot.shotId === directorContext.shotId)
         ?? visibleBlocks[0]
         ?? null;
-      const inlineSourceSwitch = sourceOptions.length > 1
-        ? h('span', {
+      const workbenchUsesH3 = workbenchShot !== null && selectedSourceIdFor(workbenchShot) === 'h3-zh';
+      const workbenchH3NeedsCompile = canCompileH3FromVideo
+        && workbenchUsesH3
+        && (h3MissingBlockNumbers.length > 0 || h3SourceOption?.available === false);
+      const inlineSourceSwitchFor = (shot) => {
+        if (sourceOptions.length <= 1) return null;
+        const selected = selectedSourceIdFor(shot);
+        const blockNumber = Number(shot?.sourceNumber ?? shot?.blockNumber);
+        const pendingKey = sourceSwitchPending === sourceChoiceKey(blockNumber);
+        return h('span', {
           className: 'sdd-inline-source-switch',
+          'data-dsh-shot-source-switch': sequenceKeyFor(shot),
           onClick: (event) => event.stopPropagation(),
           onKeyDown: (event) => event.stopPropagation(),
-        }, sourceOptions.map((entry) => h('button', {
-          key: entry.id,
-          type: 'button',
-          className: entry.id === currentSource?.id ? 'active' : '',
-          'data-dsh-source': entry.id,
-          'data-dsh-source-missing': entry.available === false ? 'true' : 'false',
-          'aria-pressed': entry.id === currentSource?.id,
-          title: entry.available === false ? `${entry.label}尚未生成` : entry.label,
-          onClick: () => chooseSource(entry.id),
-        },
-        h(SddIcon, { name: entry.id === 'video' ? 'clapperboard' : 'languages', size: 11 }),
-        entry.available === false
-          ? `${entry.id === 'video' ? '视频' : 'H3'} · 待生成`
-          : (entry.id === 'video' ? '视频' : 'H3'))))
-        : null;
+        }, sourceOptions.map((entry) => {
+          const variant = shot?.variants?.[entry.id];
+          const missing = entry.available === false || variant?.missingH3File === true;
+          const active = entry.id === selected;
+          return h('button', {
+            key: entry.id,
+            type: 'button',
+            className: active ? 'active' : '',
+            'data-dsh-source': entry.id,
+            'data-dsh-source-missing': missing ? 'true' : 'false',
+            'data-dsh-shot-source': sequenceKeyFor(shot),
+            'aria-pressed': active,
+            disabled: pendingKey,
+            title: missing
+              ? `${entry.label}尚未生成；点开后输入或同步即可创建这一镜`
+              : entry.label,
+            onClick: () => { void switchShotSource(shot, entry.id); },
+          },
+          h(SddIcon, { name: entry.id === 'video' ? 'clapperboard' : 'languages', size: 11 }),
+          pendingKey
+            ? '…'
+            : missing
+              ? `${entry.id === 'video' ? '视频' : 'H3'} · 待生成`
+              : (entry.id === 'video' ? '视频' : 'H3'));
+        }));
+      };
+      const inlineSourceSwitch = visibleBlocks.length > 0 ? inlineSourceSwitchFor(visibleBlocks[0]) : null;
       React.useEffect(() => {
         if (!wide || workbenchShot === null) return;
         const container = dramaShotScrollRef.current;
@@ -13847,7 +14201,7 @@ const PANEL_ID = 'dsh-short-drama-workbench';
         setFocusedShotKey(shotRailKey(shot));
         void recordDirectorContext({
           episodeNumber: number,
-          sourceId: currentSource.id,
+          sourceId: currentSource?.id ?? 'video',
           shotId: shot.shotId ?? null,
         });
         if (!scrollEditor) return;
@@ -13936,7 +14290,7 @@ const PANEL_ID = 'dsh-short-drama-workbench';
         },
         modeReady: directorMode === 'drama',
         productionState: productionForShot(shot),
-        sourceSwitch: inlineSourceSwitch,
+        sourceSwitch: inlineSourceSwitchFor(shot),
         shouldOpen: detail || focusedShotKey === shotRailKey(shot),
         onFocus: () => focusWorkbenchShot(shot),
         onInsert: insertShot,
@@ -14463,7 +14817,7 @@ const PANEL_ID = 'dsh-short-drama-workbench';
           }, h(SddIcon, { name: sourceGenerateBusy ? 'loader-circle' : 'languages', size: 12 }), sourceGenerateBusy ? '生成中…' : '生成中文 H3'),
           sourceGenerateError.length > 0 ? h('div', { style: css.error }, displayShotText(sourceGenerateError)) : null,
           sourceGenerateNote.length > 0 ? h('div', { style: { ...css.note, color: 'var(--sdd-success, #1f7a45)' } }, displayShotText(sourceGenerateNote)) : null),
-        !sourceUnavailable && currentSource.id === 'h3-zh' && canCompileH3FromVideo && h3MissingBlockNumbers.length > 0 && h('section', {
+        workbenchH3NeedsCompile && h('section', {
           'data-dsh-h3-missing-blocks': h3MissingBlockNumbers.join(','),
           style: {
             display: 'flex',
@@ -14475,18 +14829,29 @@ const PANEL_ID = 'dsh-short-drama-workbench';
             background: 'color-mix(in srgb, var(--sdd-warning) 8%, var(--sdd-surface))',
           },
         },
-          h('strong', { style: { fontSize: '11px' } }, `H3 缺少 ${String(h3MissingBlockNumbers.length)} 个分镜`),
-          h('button', {
-            type: 'button',
-            'data-dsh-recompile-h3': 'true',
-            style: { ...css.button(true), alignSelf: 'flex-start' },
-            disabled: sourceGenerateBusy || directorMode !== 'drama',
-            onClick: () => {
-              setSourceGenerateError('');
-              setSourceGenerateNote('');
-              setH3CompileConfirm(true);
-            },
-          }, sourceGenerateBusy ? '编译中…' : '补齐中文 H3'),
+          h('strong', { style: { fontSize: '11px' } },
+            h3MissingBlockNumbers.length > 0
+              ? `H3 缺少 ${String(h3MissingBlockNumbers.length)} 个分镜`
+              : '中文 H3 尚未生成'),
+          h('div', { style: { display: 'flex', flexWrap: 'wrap', gap: '6px' } },
+            h('button', {
+              type: 'button',
+              'data-dsh-generate-source': 'h3-zh',
+              style: css.miniButton,
+              disabled: sourceGenerateBusy || directorMode !== 'drama',
+              onClick: () => { void generateMissingSource(); },
+            }, sourceGenerateBusy ? '编译中…' : '生成中文 H3'),
+            h('button', {
+              type: 'button',
+              'data-dsh-recompile-h3': 'true',
+              style: { ...css.button(true), alignSelf: 'flex-start' },
+              disabled: sourceGenerateBusy || directorMode !== 'drama',
+              onClick: () => {
+                setSourceGenerateError('');
+                setSourceGenerateNote('');
+                setH3CompileConfirm(true);
+              },
+            }, sourceGenerateBusy ? '编译中…' : '补齐中文 H3')),
           h3CompileConfirm ? h('div', {
             'data-dsh-recompile-h3-confirm': 'true',
             style: {
@@ -14500,7 +14865,9 @@ const PANEL_ID = 'dsh-short-drama-workbench';
               fontSize: '11px',
             },
           },
-            h('span', null, `将只为缺少的第 ${h3MissingBlockNumbers.join('、')} 分镜生成 H3，不会覆盖已有 H3。`),
+            h('span', null, h3MissingBlockNumbers.length > 0
+              ? `将只为缺少的第 ${h3MissingBlockNumbers.join('、')} 分镜生成 H3，不会覆盖已有 H3。`
+              : '将从当前视频提示词生成中文 H3。已有 H3 不会被覆盖。'),
             h('div', { style: { display: 'flex', gap: '6px' } },
               h('button', {
                 type: 'button',
