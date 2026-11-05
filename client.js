@@ -5432,25 +5432,32 @@ const PANEL_ID = 'dsh-short-drama-workbench';
       };
 
       const insert = async (kind) => {
-        if (saving.current || conflict !== null) return;
-        try { await save(); } catch { return; }
-        setState('saving');
-        setNote('');
+        if (actionLock.current || actionBusy || saving.current || conflict !== null) return;
+        actionLock.current = true;
+        setActionBusy(true);
         try {
-          const result = await onInsert({
-            shotId: accepted.current.shotId ?? null,
-            index: shot.index,
-            blockNumber: shot.sourceNumber,
-            file: shot.file,
-            revision: accepted.current.revision,
-          }, kind);
-          if (result?.companion !== null && result?.companion !== undefined) {
-            setNote(`已新增视频与 H3 对应分镜；新 H3 块可再用“一键同步”细化`);
+          try { await save(); } catch { return; }
+          setState('saving');
+          setNote('');
+          try {
+            const result = await onInsert({
+              shotId: accepted.current.shotId ?? null,
+              index: shot.index,
+              blockNumber: shot.sourceNumber,
+              file: shot.file,
+              revision: accepted.current.revision,
+            }, kind);
+            if (result?.companion !== null && result?.companion !== undefined) {
+              setNote(`已新增视频与 H3 对应分镜；新 H3 块可再用“一键同步”细化`);
+            }
+            setState('idle');
+          } catch (error) {
+            setState('idle');
+            setNote(String(error?.message ?? error));
           }
-          setState('idle');
-        } catch (error) {
-          setState('idle');
-          setNote(String(error?.message ?? error));
+        } finally {
+          actionLock.current = false;
+          setActionBusy(false);
         }
       };
 
@@ -5569,7 +5576,7 @@ const PANEL_ID = 'dsh-short-drama-workbench';
               type: 'button',
               className: 'sdd-mini-btn',
               style: css.miniButton,
-              disabled: state === 'saving',
+              disabled: actionBusy || state === 'saving' || conflict !== null,
               title: t('copyHint'),
               onClick: () => insert('copy'),
             }, `⧉ ${t('copy')}`),
@@ -5577,7 +5584,7 @@ const PANEL_ID = 'dsh-short-drama-workbench';
               type: 'button',
               className: 'sdd-mini-btn',
               style: css.miniButton,
-              disabled: state === 'saving',
+              disabled: actionBusy || state === 'saving' || conflict !== null,
               title: t('addHint'),
               onClick: () => insert('blank'),
             }, `＋ ${t('add')}`),
@@ -14109,7 +14116,12 @@ const PANEL_ID = 'dsh-short-drama-workbench';
         if (Number(row.episodeNumber) !== Number(episode)) return false;
         // Re-splitting may reduce the block count. Older blocks beyond the new end are folded into
         // the final block instead of disappearing; expanding later leaves the original number alone.
-        const mappedBlock = currentVideoShotTotal > 0
+        // Folding an out-of-range block onto the final shot is only safe for a recorded H3
+        // identity (the resplit companion case). A legacy row with no shotId is just a number:
+        // while the list is temporarily short after an insert, folding block 8 onto block 7 made
+        // two clips appear under the wrong preview. Legacy rows must keep exact positional match.
+        const hasStableIdentity = typeof row.shotId === 'string' && row.shotId.length > 0;
+        const mappedBlock = hasStableIdentity && currentVideoShotTotal > 0
           ? Math.min(row.blockNumber, currentVideoShotTotal)
           : row.blockNumber;
         return mappedBlock === shot.sourceNumber;
