@@ -7685,7 +7685,7 @@ const PANEL_ID = 'dsh-short-drama-workbench';
               ? `${action === 'upscale' ? '3x 四视图' : '四视图'}内容已存在，已沿用：${asset.name}（${variant.name}）`
               : action === 'upscale'
                 ? `四视图已 3 倍超分并保存：${asset.name}（${variant.name}）`
-                : `四视图已生成：${asset.name}（${variant.name}）。需要提升清晰度时再点“3x 超分”。`);
+                : `四视图原图已生成并保存：${asset.name}（${variant.name}）`);
         } catch (error) {
           setImportError(true);
           setImportNote(String(error?.message ?? error));
@@ -7697,7 +7697,7 @@ const PANEL_ID = 'dsh-short-drama-workbench';
       const quadviewControl = (asset, variant, source, action) => {
         const key = `${asset.assetId}:${variant.name}:${action}:${source?.assetVersionId ?? 'missing'}`;
         const blocked = source === null || source === undefined || modeReady !== true || typeof onGenerateQuadview !== 'function';
-        return h('button', {
+        const control = h('button', {
           type: 'button',
           'data-dsh-generate-quadview': key,
           'data-dsh-quadview-action': action,
@@ -7706,11 +7706,20 @@ const PANEL_ID = 'dsh-short-drama-workbench';
           title: source === null || source === undefined
             ? action === 'upscale' ? '先生成或上传这个变体的四视图' : '先上传这个变体的定妆照'
             : modeReady !== true ? t('mode.required')
-              : action === 'upscale' ? '把当前四视图用 VOSR2 超分 3 倍' : '按当前定妆照生成四视图',
+              : action === 'upscale' ? '把当前四视图超分到 3 倍；超分之后生成视频速度将大大降低' : '按当前定妆照生成四视图',
           onClick: () => { void generateQuadview(asset, variant, source, action); },
         }, quadviewBusy === key
           ? action === 'upscale' ? '超分中…' : '生成中…'
           : action === 'upscale' ? '3x 超分' : '生成四视图');
+        if (action !== 'upscale') return control;
+        return h('span', {
+          style: { display: 'inline-flex', alignItems: 'center', flexWrap: 'wrap', gap: '6px' },
+        },
+        control,
+        h('span', {
+          'data-dsh-upscale-speed-warning': 'true',
+          style: { color: 'var(--dsw-warning-default, #865a00)', fontSize: '9px', lineHeight: 1.35 },
+        }, '超分之后生成视频速度将大大降低'));
       };
 
       const representativeFileForVariant = (asset, variant) => {
@@ -7727,7 +7736,7 @@ const PANEL_ID = 'dsh-short-drama-workbench';
             ? selected
             : present.find((file) => file.role === 'quadview' && file.current === true) ?? null;
           const manuallyUploaded = currentQuadview?.role === 'quadview'
-            && variant.selectionNote !== '四视图原图，待 3x 超分'
+            && variant.selectionNote !== '四视图原图'
             ? currentQuadview
             : null;
           if (manuallyUploaded !== null) return manuallyUploaded;
